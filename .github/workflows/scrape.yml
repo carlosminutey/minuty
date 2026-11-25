@@ -1,0 +1,71 @@
+name: minuty
+
+on:
+  schedule:
+    # Every 3 hours, all day: 02:30, 05:30, 08:30 … 23:30 IST (cron is UTC = IST − 5:30)
+    - cron: '0 */3 * * *'
+  workflow_dispatch: # "Run workflow" button for a manual run
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ hashFiles('package-lock.json') }}
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Scrape
+        run: node src/scrape.mjs
+        env:
+          SOURCE_URL: ${{ secrets.SOURCE_URL }}
+          TARGET_URL: ${{ secrets.TARGET_URL }}
+          SOURCE_EMAIL: ${{ secrets.SOURCE_EMAIL }}
+          SOURCE_PASSWORD: ${{ secrets.SOURCE_PASSWORD }}
+          DATA_PASSWORD: ${{ secrets.DATA_PASSWORD }}
+          AUTO_UNLOCK: ${{ vars.AUTO_UNLOCK || 'true' }}
+          MAX_UNLOCKS_PER_RUN: ${{ vars.MAX_UNLOCKS_PER_RUN || '0' }}
+          WINDOW_HOURS: ${{ vars.WINDOW_HOURS || '24' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
+          TARGET_EMAIL: ${{ secrets.TARGET_EMAIL }}
+          TARGET_PASSWORD: ${{ secrets.TARGET_PASSWORD }}
+          AUTO_POST: ${{ vars.AUTO_POST || 'true' }}
+          MAX_POSTS_PER_RUN: ${{ vars.MAX_POSTS_PER_RUN || '0' }}
+
+      - name: Commit data
+        if: always()
+        run: |
+          git config user.name "scraper-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A docs/data docs/data.enc.json 2>/dev/null || git add -A docs/data
+          git diff --cached --quiet || (git commit -m "data: $(date -u +%Y-%m-%dT%H:%MZ)" && git push)
+
+      - name: Upload error screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-screenshot
+          path: error*.png
+          if-no-files-found: ignore
+          retention-days: 3

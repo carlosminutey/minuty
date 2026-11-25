@@ -1,0 +1,19 @@
+{
+  "name": "minuty",
+  "version": "1.0.0",
+  "private": true,
+  "description": "minuty: watches a source site for new requirements, rewrites them with AI, posts them to a job board, and publishes an encrypted web page.",
+  "type": "module",
+  "scripts": {
+    "scrape": "node --env-file-if-exists=.env src/scrape.mjs",
+    "decrypt": "node --env-file-if-exists=.env src/decrypt.mjs",
+    "test-groq": "node --env-file-if-exists=.env src/test-groq.mjs",
+    "view": "node src/serve.mjs",
+    "export": "node --env-file-if-exists=.env src/decrypt.mjs > today.decrypted.json",
+    "post": "node --env-file-if-exists=.env src/post.mjs",
+    "rekey": "node --env-file-if-exists=.env src/rekey.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.65.1"
+  }
+}

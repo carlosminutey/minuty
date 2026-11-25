@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#f6f6f3">
+<title>Minuty</title>
+<style>
+  :root {
+    --bg: #f6f6f3; --card: #ffffff; --text: #16181d; --muted: #6b6f78; --line: #e4e4df;
+    --accent: #2f6b1f; --accent-soft: #e5f2df; --warn: #b45309; --warn-soft: #fdf0dc;
+    --new: #c2410c; --new-soft: #fdebdd; --chip: #efefea; --blue: #1d4ed8; --blue-soft: #e3ebfd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101114; --card: #1a1c21; --text: #ececec; --muted: #9a9ea8; --line: #2a2d34;
+      --accent: #8fd16f; --accent-soft: #20301a; --warn: #fbbf24; --warn-soft: #33270f;
+      --new: #fb923c; --new-soft: #3a2412; --chip: #252830; --blue: #93b4ff; --blue-soft: #1b2440;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+  .hidden { display: none !important; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  /* Password gate */
+  .gate { max-width: 360px; margin: 18vh auto 0; display: grid; gap: 10px; padding: 0 16px; }
+  .gate h1 { font-size: 22px; margin: 0 0 4px; }
+  input[type=password], input[type=search] {
+    width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); font-size: 16px;
+  }
+  .btn { padding: 12px 14px; border-radius: 12px; border: 0; background: var(--text); color: var(--bg); font-weight: 600; }
+  .err { color: var(--new); font-size: 13px; min-height: 1em; }
+  .meta { color: var(--muted); font-size: 12px; }
+
+  /* Top bar */
+  .top { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 12px 0 8px; border-bottom: 1px solid var(--line); }
+  .top-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .top h1 { font-size: 19px; margin: 0; }
+  .scroller { display: flex; gap: 6px; overflow-x: auto; margin-top: 10px; scrollbar-width: none; }
+  .scroller::-webkit-scrollbar { display: none; }
+  .pill { flex: none; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); font-size: 13px; white-space: nowrap; }
+  .pill.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .pill .n { opacity: .65; margin-left: 4px; }
+
+  /* Day summary */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 12px 0 8px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px 6px; text-align: center; }
+  .stat b { display: block; font-size: 18px; line-height: 1.2; }
+  .stat span { font-size: 11px; color: var(--muted); }
+  .search { margin: 8px 0; }
+
+  /* Cards */
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin: 10px 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--chip); color: var(--muted); }
+  .chip.new { background: var(--new-soft); color: var(--new); font-weight: 600; }
+  .title { font-weight: 650; font-size: 16px; margin: 2px 0; overflow-wrap: anywhere; }
+  .sub { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .sub b { color: var(--text); font-weight: 600; }
+
+  /* Pipeline: scraped → unlocked → rewritten → posted */
+  .pipe { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 10px 0 4px; }
+  .step { border-radius: 10px; padding: 6px 4px; text-align: center; font-size: 11px; line-height: 1.3; background: var(--chip); color: var(--muted); }
+  .step b { display: block; font-size: 12px; }
+  .step.done { background: var(--accent-soft); color: var(--accent); }
+  .step.warn { background: var(--warn-soft); color: var(--warn); }
+
+  .section { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .section-head h3 { margin: 0; font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary h3::after { content: " ▸"; }
+  details[open] > summary h3::after { content: " ▾"; }
+  .desc { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; margin-top: 8px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr auto; gap: 6px 10px; font-size: 13px; margin-top: 8px; align-items: center; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+  .kv a { color: var(--blue); }
+  .contact { background: var(--accent-soft); border-radius: 12px; padding: 4px 12px 10px; margin-top: 8px; }
+
+  .copy { flex: none; font-size: 12px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); }
+  .copy.done { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .link { font-size: 13px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--text); text-decoration: none; }
+  .link.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+
+  /* Run log */
+  .run { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 8px 0; font-size: 13px; }
+  .run .nums { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); }
+  .run .nums b { color: var(--text); }
+  .run .notes { margin-top: 4px; color: var(--warn); overflow-wrap: anywhere; }
+
+  /* Bottom nav */
+  .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--card); border-top: 1px solid var(--line);
+         display: flex; justify-content: center; padding-bottom: env(safe-area-inset-bottom); }
+  .nav button { flex: 1; max-width: 240px; border: 0; background: none; padding: 10px 0 12px; font-size: 12px; color: var(--muted); }
+  .nav button b { display: block; font-size: 18px; line-height: 1.2; }
+  .nav button.on { color: var(--text); font-weight: 600; }
+  .toast { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--text); color: var(--bg);
+           padding: 8px 14px; border-radius: 999px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 7; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<form id="gate" class="gate">
+  <h1>Minuty</h1>
+  <input id="pw" type="password" placeholder="Data password" autocomplete="current-password" required>
+  <label class="meta"><input id="remember" type="checkbox" checked> Remember on this device</label>
+  <button class="btn" type="submit">Open</button>
+  <div id="err" class="err"></div>
+</form>
+
+<div id="app" class="hidden">
+  <div class="top"><div class="wrap">
+    <div class="top-row"><h1 id="heading">Today</h1><span id="updated" class="meta"></span></div>
+    <div id="days" class="scroller"></div>
+  </div></div>
+  <div class="wrap">
+    <section id="view-posts">
+      <div id="stats" class="stats"></div>
+      <div id="filters" class="scroller"></div>
+      <input id="q" class="search" type="search" placeholder="Search title, client, email…">
+      <div id="list"></div>
+    </section>
+    <section id="view-runs" class="hidden"><div id="runs"></div></section>
+  </div>
+  <nav class="nav">
+    <button data-view="today" class="on"><b>●</b>Today</button>
+    <button data-view="days"><b>▦</b>Past days</button>
+    <button data-view="runs"><b>↻</b>Runs</button>
+  </nav>
+</div>
+<div id="toast" class="toast">Copied</div>
+
+<script>
+const KEY = 'leadwatch:pw'; // kept so phones that saved the password stay signed in
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+async function decrypt(box, password) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: unb64(box.salt), iterations: box.iterations, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(box.iv) }, key, unb64(box.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+let PW = null, STATE = null, VIEW = 'today', DAY = null, FILTER = 'all';
+const DAYS = {}; // date → items, loaded on demand
+
+const istToday = () => new Date(Date.now() + 330 * 6e4).toISOString().slice(0, 10);
+const fmtDay = (d) => {
+  if (d === istToday()) return 'Today';
+  if (d === new Date(Date.now() + 330 * 6e4 - 864e5).toISOString().slice(0, 10)) return 'Yesterday';
+  return new Date(d + 'T00:00:00Z').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+};
+const istTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '';
+const istDateTime = (iso) => iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '';
+function ago(iso) {
+  const m = Math.floor((Date.now() - new Date(iso)) / 6e4);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  if (m < 1440) return `${Math.floor(m / 60)}h ago`;
+  return `${Math.floor(m / 1440)}d ago`;
+}
+
+async function fetchBox(path) {
+  const res = await fetch(`data/${path}?t=${Date.now()}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(res.status === 404 ? 'No data yet. Has the scraper run?' : `Could not load ${path}`);
+  return decrypt(await res.json(), PW);
+}
+async function loadDay(date) {
+  if (!DAYS[date]) DAYS[date] = (await fetchBox(`${date}.enc.json`)).items || {};
+  return DAYS[date];
+}
+
+// ---------- copy ----------
+const COPY = [];
+const copyBtn = (text, label = 'Copy') => text ? `<button class="copy" data-copy="${COPY.push(String(text)) - 1}">${label}</button>` : '';
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 1200); }
+async function doCopy(btn) {
+  const text = COPY[Number(btn.dataset.copy)];
+  try { await navigator.clipboard.writeText(text); }
+  catch { const ta = document.createElement('textarea'); ta.value = text; document.body.append(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+  const old = btn.textContent; btn.textContent = 'Copied'; btn.classList.add('done');
+  setTimeout(() => { btn.textContent = old; btn.classList.remove('done'); }, 1200);
+  toast('Copied');
+}
+
+// ---------- post card ----------
+const srcLink = (id) => STATE.sourceUrl ? `${STATE.sourceUrl}/requirements/${id}` : '';
+function contacts(d) {
+  const cd = d?.contactData && typeof d.contactData === 'object' ? d.contactData : {};
+  return Object.entries(cd).filter(([k, v]) => !/^(id|requirement_id|created_at|updated_at|user_id)$/.test(k) && v != null && v !== '');
+}
+function contactValue(k, v) {
+  const s = String(v).trim();
+  if (/^\S+@\S+\.\S+$/.test(s)) return `<a href="mailto:${esc(s)}">${esc(s)}</a>`;
+  if (/^https?:\/\//i.test(s)) return `<a href="${esc(s)}" target="_blank" rel="noopener">${esc(s)}</a>`;
+  if (/phone|whatsapp|mobile/i.test(k) && /^[+\d][\d\s()-]{5,}$/.test(s)) {
+    const n = s.replace(/[^\d+]/g, '');
+    return `<a href="tel:${esc(n)}">${esc(s)}</a> · <a href="https://wa.me/${esc(n.replace('+', ''))}" target="_blank" rel="noopener">WhatsApp</a>`;
+  }
+  return esc(s);
+}
+
+function pipeline(it) {
+  const d = it.detail, ai = it.ai, post = it.post;
+  const step = (cls, name, sub) => `<div class="step ${cls}"><b>${name}</b>${esc(sub)}</div>`;
+  return `<div class="pipe">
+    ${step(d ? 'done' : '', 'Scraped', d ? istTime(d.scrapedAt || it.firstSeenAt) : 'waiting')}
+    ${step(d?.unlocked ? 'done' : d ? 'warn' : '', 'Unlocked', d?.unlocked ? '✓' : d ? (d.unlockResult || 'no') : '–')}
+    ${step(ai ? 'done' : '', 'Rewritten', ai ? (ai.format || istTime(ai.at)) : 'waiting')}
+    ${step(post?.postedAt ? ((post.publishSet === false || post.bidSet === false) ? 'warn' : 'done') : '', 'Posted', post?.postedAt ? istTime(post.postedAt) : 'waiting')}
+  </div>`;
+}
+
+function card(it, isNew) {
+  const r = it.row, d = it.detail, ai = it.ai, post = it.post;
+  const cs = contacts(d);
+  const emails = cs.filter(([k]) => /mail/i.test(k)).map(([, v]) => v).join(', ');
+  const all = [
+    ai ? `${ai.title}\n\n${ai.description}` : `${r.title}\n\n${r.description}`,
+    '', `Budget: ${r.budget || '-'}`, `Category: ${r.category || '-'}`, `Client: ${r.client_name || '-'}`,
+    ...cs.map(([k, v]) => `${k}: ${v}`), '', srcLink(r.id),
+  ].join('\n');
+
+  const postRows = post?.postedAt ? [
+    ['Posted', istDateTime(post.postedAt)],
+    ['Title used', post.title],
+    post.publish ? ['Publish time', `${post.publish.date} ${post.publish.time} IST${post.publishSet === false ? ' (not confirmed)' : ''}`] : null,
+    post.bid ? ['Bid cost', `${post.bid}${post.bidSet === false ? ' (not confirmed)' : ''}`] : null,
+    post.note ? ['Note', post.note] : null,
+  ].filter(Boolean) : [];
+
+  return `<article class="card">
+    <div class="chips">
+      ${isNew ? '<span class="chip new">NEW</span>' : ''}
+      ${r.status !== 'open' ? `<span class="chip">${esc(r.status)}</span>` : ''}
+      ${r.category ? `<span class="chip">${esc(r.category)}</span>` : ''}
+      ${r.work_mode ? `<span class="chip">${esc(r.work_mode.replace('_', '-'))}</span>` : ''}
+    </div>
+    <div class="title">${esc(ai?.title || r.title)}</div>
+    <div class="sub"><b>${esc(r.budget || '')}</b><span>${esc(r.client_name || '')}</span><span>posted ${istTime(r.created_at)} IST · ${ago(r.created_at)}</span></div>
+    ${pipeline(it)}
+
+    ${cs.length ? `<div class="contact"><dl class="kv">
+      ${cs.map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${contactValue(k, v)}</dd><span>${copyBtn(v)}</span>`).join('')}
+    </dl></div>` : d?.unlocked ? `<div class="meta" style="margin-top:8px">${esc(d.contactText || 'No contact details captured.')}</div>` : ''}
+
+    ${ai ? `<details class="section" ${isNew ? 'open' : ''}><summary class="section-head"><h3>AI rewrite${ai.format ? ' · ' + esc(ai.format) : ''}</h3></summary>
+      <div class="section-head" style="margin-top:8px"><div class="title" style="font-size:15px">${esc(ai.title)}</div>${copyBtn(ai.title)}</div>
+      <div class="desc">${esc(ai.description)}</div>
+      <div class="actions">${copyBtn(ai.description, 'Copy description')}${copyBtn(`${ai.title}\n\n${ai.description}`, 'Copy title + description')}</div>
+      ${ai.clientLocation || ai.duration ? `<dl class="kv"><dt>Location</dt><dd>${esc(ai.clientLocation || '-')}</dd><span></span><dt>Duration</dt><dd>${esc(ai.duration || 'form default')}</dd><span></span></dl>` : ''}
+    </details>` : ''}
+
+    ${postRows.length ? `<details class="section"><summary class="section-head"><h3>Posting</h3></summary>
+      <dl class="kv">${postRows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd><span></span>`).join('')}</dl>
+    </details>` : ''}
+
+    <details class="section"><summary class="section-head"><h3>Original</h3></summary>
+      <div class="section-head" style="margin-top:8px"><div class="title" style="font-size:15px">${esc(r.title)}</div>${copyBtn(r.title)}</div>
+      <div class="desc">${esc(r.description)}</div>
+      <dl class="kv">
+        ${r.required_skills ? `<dt>Skills</dt><dd>${esc(r.required_skills)}</dd><span>${copyBtn(r.required_skills)}</span>` : ''}
+        ${r.required_experience ? `<dt>Experience</dt><dd>${esc(r.required_experience)}</dd><span></span>` : ''}
+        <dt>Seen</dt><dd>${esc(istDateTime(it.firstSeenAt))}</dd><span></span>
+      </dl>
+      <div class="actions">${copyBtn(r.description, 'Copy original')}</div>
+    </details>
+
+    <div class="actions">
+      ${copyBtn(all, 'Copy everything')}
+      ${emails ? copyBtn(emails, 'Copy email') : ''}
+      ${STATE.sourceUrl ? `<a class="link" href="${esc(srcLink(r.id))}" target="_blank" rel="noopener">Open source ↗</a>` : ''}
+    </div>
+  </article>`;
+}
+
+// ---------- views ----------
+const FILTERS = [
+  ['all', 'All', () => true],
+  ['todo', 'Not posted', (it) => !it.post?.postedAt],
+  ['posted', 'Posted', (it) => it.post?.postedAt],
+  ['locked', 'Locked', (it) => !it.detail?.unlocked],
+];
+
+function renderDays() {
+  const dates = Object.keys(STATE.days || {}).sort().reverse();
+  const today = istToday();
+  if (VIEW === 'days') {
+    const past = dates.filter((d) => d !== today);
+    if (!DAY || DAY === today) DAY = past[0] || null;
+    $('#days').innerHTML = past.length
+      ? past.map((d) => `<button class="pill ${d === DAY ? 'on' : ''}" data-day="${d}">${fmtDay(d)}<span class="n">${STATE.days[d].count}</span></button>`).join('')
+      : '<span class="meta">No past days yet.</span>';
+    $('#days').classList.remove('hidden');
+  } else {
+    DAY = today;
+    $('#days').classList.add('hidden');
+  }
+}
+
+async function render() {
+  COPY.length = 0;
+  document.querySelectorAll('.nav button').forEach((b) => b.classList.toggle('on', b.dataset.view === VIEW));
+  $('#view-posts').classList.toggle('hidden', VIEW === 'runs');
+  $('#view-runs').classList.toggle('hidden', VIEW !== 'runs');
+  const last = STATE.runs?.[0];
+  $('#updated').textContent = `checked ${ago(STATE.updatedAt)}`;
+
+  if (VIEW === 'runs') {
+    $('#heading').textContent = 'Runs';
+    $('#days').classList.add('hidden');
+    $('#runs').innerHTML = (STATE.runs || []).map((r) => `<div class="run">
+      <b>${esc(istDateTime(r.at))}</b> <span class="meta">${r.kind === 'post' ? 'post only' : 'scrape'}</span>
+      <div class="nums"><span>new <b>${r.new ?? 0}</b></span><span>unlocked <b>${r.unlocked ?? 0}</b></span><span>rewritten <b>${r.rewritten ?? 0}</b></span><span>posted <b>${r.posted ?? 0}</b></span></div>
+      ${r.notes?.length ? `<div class="notes">${r.notes.map(esc).join('<br>')}</div>` : ''}
+    </div>`).join('') || '<div class="empty">No runs yet.</div>';
+    return;
+  }
+
+  renderDays();
+  $('#heading').textContent = DAY ? (VIEW === 'today' ? `Today · ${new Date(DAY + 'T00:00:00Z').toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}` : fmtDay(DAY)) : 'Past days';
+  if (!DAY || !STATE.days?.[DAY]) {
+    $('#stats').innerHTML = ''; $('#filters').innerHTML = '';
+    $('#list').innerHTML = `<div class="empty">${VIEW === 'today' ? 'No posts today yet. The next check runs within 3 hours.' : 'Nothing here yet.'}</div>`;
+    return;
+  }
+  const token = (render.token = (render.token || 0) + 1);
+  $('#list').innerHTML = DAYS[DAY] ? $('#list').innerHTML : '<div class="empty">Loading…</div>';
+  const dayItems = await loadDay(DAY);
+  if (token !== render.token) return; // a newer render started while this day was loading
+  const items = Object.values(dayItems).sort((a, b) => String(b.row.created_at).localeCompare(String(a.row.created_at)));
+  const n = (f) => items.filter(f).length;
+  $('#stats').innerHTML = [
+    ['Captured', items.length], ['Unlocked', n((it) => it.detail?.unlocked)], ['Rewritten', n((it) => it.ai)], ['Posted', n((it) => it.post?.postedAt)],
+  ].map(([l, v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
+  $('#filters').innerHTML = FILTERS.map(([id, label, f]) => `<button class="pill ${id === FILTER ? 'on' : ''}" data-filter="${id}">${label}<span class="n">${n(f)}</span></button>`).join('');
+
+  const q = $('#q').value.trim().toLowerCase();
+  const f = FILTERS.find((x) => x[0] === FILTER)[2];
+  const list = items.filter(f).filter((it) => !q || JSON.stringify([it.row, it.ai?.title, it.detail?.contactData]).toLowerCase().includes(q));
+  $('#list').innerHTML = list.length
+    ? list.map((it) => card(it, last && it.firstSeenAt === last.at)).join('')
+    : '<div class="empty">No posts match.</div>';
+}
+
+async function open(pw, remember) {
+  PW = pw;
+  STATE = await fetchBox('state.enc.json');
+  try { remember ? localStorage.setItem(KEY, pw) : localStorage.removeItem(KEY); } catch {}
+  $('#gate').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  await render();
+}
+
+$('#gate').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('#err').textContent = '';
+  try { await open($('#pw').value, $('#remember').checked); }
+  catch (err) { $('#err').textContent = err.name === 'OperationError' ? 'Wrong password.' : err.message; }
+});
+$('#q').addEventListener('input', () => render());
+document.addEventListener('click', async (e) => {
+  const v = e.target.closest('[data-view]');
+  if (v) { VIEW = v.dataset.view; FILTER = 'all'; window.scrollTo(0, 0); return render(); }
+  const d = e.target.closest('[data-day]');
+  if (d) { DAY = d.dataset.day; FILTER = 'all'; return render(); }
+  const f = e.target.closest('[data-filter]');
+  if (f) { FILTER = f.dataset.filter; return render(); }
+  const c = e.target.closest('[data-copy]');
+  if (c) { e.preventDefault(); return doCopy(c); }
+});
+
+(async () => {
+  let saved = null;
+  try { saved = localStorage.getItem(KEY); } catch {}
+  if (saved) open(saved, true).catch(() => { try { localStorage.removeItem(KEY); } catch {} });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "viewer", "runtimeExecutable": "node", "runtimeArgs": ["src/serve.mjs"], "port": 5174 }
+  ]
+}
