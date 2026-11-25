@@ -1,6 +1,6 @@
 // Re-encrypt all saved data after changing DATA_PASSWORD.
 // Put the previous password in .env as OLD_DATA_PASSWORD, run `npm run rekey`, then remove that line.
-// Also brings old data up to date (field names, source address used by the page).
+// Also stores the source address the page uses for its links.
 import fs from 'node:fs';
 import { encryptJson, decryptJson } from './crypto.mjs';
 
@@ -19,13 +19,6 @@ for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.enc.json'))) {
     try { data = await decryptJson(box, old); } catch { throw new Error(`${f}: not readable with DATA_PASSWORD or OLD_DATA_PASSWORD.`); }
   }
 
-  // Older field names for the posting record.
-  if (data.hhPosted) { data.postLedger = { ...data.hhPosted, ...data.postLedger }; delete data.hhPosted; }
-  for (const it of Object.values(data.items ?? {})) if (it.hh) { it.post ??= it.hh; delete it.hh; }
-  for (const r of data.runs ?? []) {
-    if (r.hhPosted != null) { r.posted = r.hhPosted; delete r.hhPosted; }
-    if (r.kind === 'post-hh') r.kind = 'post';
-  }
   if (f === 'state.enc.json') {
     data.sourceUrl = (process.env.SOURCE_URL ?? '').trim().replace(/\/+$/, '') || data.sourceUrl;
     data.dayHashes = {}; // the next save writes every day file fresh
