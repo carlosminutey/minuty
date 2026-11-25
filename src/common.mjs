@@ -167,3 +167,31 @@ export async function ensureAi(store, run) {
   }
   log(`AI rewrites: ${run.rewritten}`);
 }
+
+// Signs in on a login page and waits until it leaves `/auth`. On a slow machine the page's
+// script may not be ready when the button is first clicked, so it waits for the page to
+// settle and retries a few times. Errors never include page text or addresses (logs are public).
+export async function signIn(page, { url, email, password, emailBox, passwordBox, submit, label }) {
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {});
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await emailBox().fill(email);
+    await passwordBox().fill(password);
+    await page.waitForTimeout(500 * attempt);
+    await submit().click();
+    try {
+      await page.waitForURL((u) => !u.pathname.startsWith('/auth'), { timeout: attempt === 3 ? 30_000 : 12_000 });
+      log(`${label}: signed in (attempt ${attempt})`);
+      return;
+    } catch {
+      const err = await page.locator('[role=alert], [data-sonner-toast]').allInnerTexts().catch(() => []);
+      if (err.some((t) => /invalid|incorrect|wrong|credentials/i.test(t))) {
+        throw new Error(`${label}: sign-in rejected (wrong email or password?)`);
+      }
+      log(`${label}: still on the sign-in page after attempt ${attempt}, retrying…`);
+      await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {});
+    }
+  }
+  throw new Error(`${label}: sign-in did not complete after 3 attempts`);
+}

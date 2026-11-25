@@ -69,7 +69,7 @@ npm install; npx playwright install chromium; npm run scrape
 - Changed `DATA_PASSWORD`? Add the old one as `OLD_DATA_PASSWORD` in `.env`, run `npm run rekey`, then remove that line.
 
 ## Notes
-- If a run fails, the Actions log says why, and an error screenshot is attached to the run.
+- If a run fails, the Actions log says why. Logs never show site addresses or page text, because the repo is public.
 - GitHub may delay scheduled runs by a few minutes when it's busy. That's normal.
 
 ## Code map

@@ -60,12 +60,3 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add -A docs/data docs/data.enc.json 2>/dev/null || git add -A docs/data
           git diff --cached --quiet || (git commit -m "data: $(date -u +%Y-%m-%dT%H:%MZ)" && git push)
-
-      - name: Upload error screenshot
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-screenshot
-          path: error*.png
-          if-no-files-found: ignore
-          retention-days: 3

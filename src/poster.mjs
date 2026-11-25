@@ -1,6 +1,6 @@
 // Posts scraped jobs to the job board through its admin "Add job" form (there is no API),
 // then sets each job's "Publish date & time (IST)" to the source site's posting time.
-import { CFG, log } from './common.mjs';
+import { CFG, log, signIn } from './common.mjs';
 import { buildJob } from './job-map.mjs';
 
 const boardUrl = () => CFG.targetUrl;
@@ -42,19 +42,14 @@ export function postable(store, { needAi = true } = {}) {
 }
 
 async function login(page) {
-  log('Job board: logging in…');
-  await page.goto(`${boardUrl()}/auth`, { waitUntil: 'domcontentloaded' });
-  await page.locator('input[type=email]').first().fill(CFG.targetEmail);
-  await page.locator('input[type=password]').first().fill(CFG.targetPassword);
+  log('Job board: signing in…');
   const submit = page.locator('form:has(input[type=password]) button[type=submit]');
-  if (await submit.count()) await submit.first().click();
-  else await page.getByRole('button', { name: /^(sign in|log in|login)$/i }).first().click();
-  try {
-    await page.waitForURL((u) => !u.pathname.startsWith('/auth'), { timeout: 30_000 });
-  } catch {
-    const err = await page.locator('[role=alert], [data-sonner-toast]').allInnerTexts().catch(() => []);
-    throw new Error(`Job board login failed. ${err.join(' | ')}`.trim());
-  }
+  await signIn(page, {
+    url: `${boardUrl()}/auth`, email: CFG.targetEmail, password: CFG.targetPassword, label: 'Job board',
+    emailBox: () => page.locator('input[type=email]').first(),
+    passwordBox: () => page.locator('input[type=password]').first(),
+    submit: () => submit.first(),
+  });
 }
 
 async function openJobsPage(page) {

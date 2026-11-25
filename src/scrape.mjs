@@ -1,7 +1,7 @@
 // minuty: watches the source site: log in, find new requirements, open each one,
 // expand the full text, (optionally) unlock the client chat, and save everything
 // into encrypted files in docs/data/ (one per IST day + a state file) that the web page reads.
-import { CFG, log, requireEnv, loadStore, saveStore, launchBrowser, newPage, ensureAi } from './common.mjs';
+import { CFG, log, requireEnv, loadStore, saveStore, launchBrowser, newPage, ensureAi, signIn } from './common.mjs';
 import { lastHoursWindow, inWindow } from './window.mjs';
 import { postJobs } from './poster.mjs';
 
@@ -13,31 +13,13 @@ const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').tr
 const fingerprint = (row) => `${norm(row.title)}|${norm(row.description).slice(0, 400)}`;
 
 async function login(page) {
-  log('Logging in…');
-  await page.goto(`${BASE}/auth`, { waitUntil: 'domcontentloaded' });
-  await page.locator('#email').fill(CFG.email);
-  await page.locator('#pw').fill(CFG.password);
-  // Record what the login server answers (status + error text only, never the request).
-  const authReplies = [];
-  const onAuth = async (r) => {
-    if (!/\/auth\/v1\/token/.test(r.url())) return;
-    authReplies.push(`${r.status()} ${(await r.text().catch(() => '')).replace(/"access_token":"[^"]+"/, '').slice(0, 160)}`);
-  };
-  page.on('response', onAuth);
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  try {
-    await page.waitForURL((u) => !u.pathname.startsWith('/auth'), { timeout: 30_000 });
-  } catch {
-    const err = await page.locator('[role=alert], [data-sonner-toast], .text-destructive').allInnerTexts().catch(() => []);
-    const shown = (await page.locator('main, body').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
-    throw new Error(
-      `Login failed. Message: ${err.join(' | ') || 'none'}. Still on ${new URL(page.url()).pathname}. ` +
-        `Login server replies: ${authReplies.join(' || ') || 'none (request never sent)'}. Page shows: ${shown}`,
-    );
-  } finally {
-    page.off('response', onAuth);
-  }
-  log('Logged in →', page.url());
+  log('Source: signing in…');
+  await signIn(page, {
+    url: `${BASE}/auth`, email: CFG.email, password: CFG.password, label: 'Source',
+    emailBox: () => page.locator('#email'),
+    passwordBox: () => page.locator('#pw'),
+    submit: () => page.getByRole('button', { name: 'Sign in', exact: true }),
+  });
 }
 
 // The dashboard loads the full requirement list as JSON; we read that response
@@ -233,7 +215,7 @@ async function main() {
     if (feedOk || !firstRun) {
       store.runs = [run, ...(store.runs ?? [])].slice(0, 200);
       await saveStore(store);
-      log('Saved.', JSON.stringify(run));
+      log('Saved.', JSON.stringify({ ...run, notes: run.notes.length }), run.notes.length ? '(details on the web page, Runs tab)' : '');
     }
   }
 }

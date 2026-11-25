@@ -34,6 +34,6 @@ if (dry) {
     await browser.close();
     store.runs = [run, ...(store.runs ?? [])].slice(0, 200);
     await saveStore(store);
-    log('Saved.', JSON.stringify(run));
+    log('Saved.', JSON.stringify({ ...run, notes: run.notes.length }), run.notes.length ? '(details on the web page, Runs tab)' : '');
   }
 }
