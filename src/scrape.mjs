@@ -17,16 +17,25 @@ async function login(page) {
   await page.goto(`${BASE}/auth`, { waitUntil: 'domcontentloaded' });
   await page.locator('#email').fill(CFG.email);
   await page.locator('#pw').fill(CFG.password);
+  // Record what the login server answers (status + error text only, never the request).
+  const authReplies = [];
+  const onAuth = async (r) => {
+    if (!/\/auth\/v1\/token/.test(r.url())) return;
+    authReplies.push(`${r.status()} ${(await r.text().catch(() => '')).replace(/"access_token":"[^"]+"/, '').slice(0, 160)}`);
+  };
+  page.on('response', onAuth);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   try {
     await page.waitForURL((u) => !u.pathname.startsWith('/auth'), { timeout: 30_000 });
   } catch {
     const err = await page.locator('[role=alert], [data-sonner-toast], .text-destructive').allInnerTexts().catch(() => []);
-    const shown = (await page.locator('form').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
+    const shown = (await page.locator('main, body').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
     throw new Error(
       `Login failed. Message: ${err.join(' | ') || 'none'}. Still on ${new URL(page.url()).pathname}. ` +
-        `Email length ${CFG.email.length}, password length ${CFG.password.length}. Form shows: ${shown}`,
+        `Login server replies: ${authReplies.join(' || ') || 'none (request never sent)'}. Page shows: ${shown}`,
     );
+  } finally {
+    page.off('response', onAuth);
   }
   log('Logged in →', page.url());
 }
