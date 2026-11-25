@@ -21,8 +21,12 @@ async function login(page) {
   try {
     await page.waitForURL((u) => !u.pathname.startsWith('/auth'), { timeout: 30_000 });
   } catch {
-    const err = await page.locator('[role=alert], [data-sonner-toast]').allInnerTexts().catch(() => []);
-    throw new Error(`Login failed. ${err.join(' | ')}`.trim());
+    const err = await page.locator('[role=alert], [data-sonner-toast], .text-destructive').allInnerTexts().catch(() => []);
+    const shown = (await page.locator('form').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
+    throw new Error(
+      `Login failed. Message: ${err.join(' | ') || 'none'}. Still on ${new URL(page.url()).pathname}. ` +
+        `Email length ${CFG.email.length}, password length ${CFG.password.length}. Form shows: ${shown}`,
+    );
   }
   log('Logged in →', page.url());
 }
