@@ -36,7 +36,7 @@ function markPosted(store, it, rec) {
 // Ready to post: open, scraped, AI done in the current format (when Groq is on), never posted before.
 export function postable(store, { needAi = true } = {}) {
   return Object.values(store.items)
-    .filter((it) => it.row.status === 'open' && it.detail && !alreadyPosted(store, it))
+    .filter((it) => (it.row.status === 'open' || it.retry) && it.detail && !alreadyPosted(store, it))
     .filter((it) => !needAi || !CFG.groqKey || it.ai?.format)
     .sort((a, b) => String(b.row.created_at).localeCompare(String(a.row.created_at)));
 }
@@ -184,8 +184,15 @@ export async function postJobs(page, store, { limit = Infinity, run, needAi = tr
       await openJobsPage(page);
       // Safety net against double posting if a previous run crashed before saving its ledger.
       if (await page.getByText(titleKey(job.title)).count()) {
-        markPosted(store, it, { postedAt: new Date().toISOString(), title: job.title, note: 'already on the job board' });
-        log('   already on the job board, skipped');
+        markPosted(store, it, { postedAt: new Date().toISOString(), title: job.title, publish: job.publish, note: 'already on the job board' });
+        log('   already on the job board, not posted again');
+        if (it.retry) {
+          // A retry of a job that is already there: just make sure its publish time and bid are set.
+          const bid = randomBid();
+          const set = await setCardValues(page, job.title, job.publish, bid);
+          Object.assign(it.post, { publishSet: set.publishOk, bid, bidSet: set.bidOk });
+          log(`   card fixed: publish ${set.publishOk ? 'ok' : 'NOT confirmed'}, bid ${set.bidOk ? bid : 'NOT confirmed'}`);
+        }
         continue;
       }
       await fillForm(page, job);

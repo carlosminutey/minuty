@@ -103,6 +103,10 @@
   .nav button { flex: 1; max-width: 240px; border: 0; background: none; padding: 10px 0 12px; font-size: 12px; color: var(--muted); }
   .nav button b { display: block; font-size: 18px; line-height: 1.2; }
   .nav button.on { color: var(--text); font-weight: 600; }
+  .top-actions { display: flex; gap: 6px; }
+  .top-row + .top-row { margin-top: 2px; }
+  #req { color: var(--warn); }
+  .link[disabled] { opacity: .6; }
   .toast { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--text); color: var(--bg);
            padding: 8px 14px; border-radius: 999px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 7; }
   .toast.show { opacity: 1; }
@@ -119,7 +123,9 @@
 
 <div id="app" class="hidden">
   <div class="top"><div class="wrap">
-    <div class="top-row"><h1 id="heading">Today</h1><span id="updated" class="meta"></span></div>
+    <div class="top-row"><h1 id="heading">Today</h1>
+      <div class="top-actions"><button class="link" id="refresh" title="Reload">↻</button><button class="link primary" id="scrape">Scrape now</button></div></div>
+    <div class="top-row"><span id="updated" class="meta"></span><span id="req" class="meta"></span></div>
     <div id="days" class="scroller"></div>
   </div></div>
   <div class="wrap">
@@ -143,15 +149,24 @@
 const KEY = 'leadwatch:pw'; // kept so phones that saved the password stay signed in
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-
-async function decrypt(box, password) {
-  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: unb64(box.salt), iterations: box.iterations, hash: 'SHA-256' },
-    base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(box.iv) }, key, unb64(box.ct));
-  return JSON.parse(new TextDecoder().decode(pt));
+// Database (Supabase). The publishable key is public by design: the tables are locked, and
+// every function the page calls checks the password on the server.
+const DB_URL = 'https://fcaeqtmyysbvbaanvzxr.supabase.co';
+const DB_KEY = 'sb_publishable_lKQBOh5O9H-rLXR1DEk4vA_nT7CTVqk';
+async function rpc(name, args = {}) {
+  const res = await fetch(`${DB_URL}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: { apikey: DB_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ p_pass: PW, ...args }),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let m = {}; try { m = JSON.parse(text); } catch {}
+    const err = new Error(m.code === '28P01' ? 'Wrong password.' : (m.message || `Server error ${res.status}`));
+    err.wrong = m.code === '28P01';
+    throw err;
+  }
+  return text ? JSON.parse(text) : null;
 }
 
 let PW = null, STATE = null, VIEW = 'today', DAY = null, FILTER = 'all';
@@ -173,13 +188,8 @@ function ago(iso) {
   return `${Math.floor(m / 1440)}d ago`;
 }
 
-async function fetchBox(path) {
-  const res = await fetch(`data/${path}?t=${Date.now()}`, { cache: 'no-store' });
-  if (!res.ok) throw new Error(res.status === 404 ? 'No data yet. Has the scraper run?' : `Could not load ${path}`);
-  return decrypt(await res.json(), PW);
-}
 async function loadDay(date) {
-  if (!DAYS[date]) DAYS[date] = (await fetchBox(`${date}.enc.json`)).items || {};
+  if (!DAYS[date]) DAYS[date] = (await rpc('minuty_day', { p_day: date })) || {};
   return DAYS[date];
 }
 
@@ -281,10 +291,37 @@ function card(it, isNew) {
 
     <div class="actions">
       ${copyBtn(all, 'Copy everything')}
+      ${retryBtn(it)}
       ${emails ? copyBtn(emails, 'Copy email') : ''}
       ${STATE.sourceUrl ? `<a class="link" href="${esc(srcLink(r.id))}" target="_blank" rel="noopener">Open source ↗</a>` : ''}
     </div>
   </article>`;
+}
+
+function retryBtn(it) {
+  const waiting = (STATE.requests || []).some((q) => !q.done_at && q.kind === 'retry' && q.post_id === it.id);
+  if (waiting) return '<button class="link" disabled>Retry requested…</button>';
+  const p = it.post;
+  // Posted and fully confirmed: nothing to retry.
+  if (p?.postedAt && p.publishSet !== false && p.bidSet !== false) return '';
+  return `<button class="link" data-retry="${esc(it.id)}">${p?.postedAt ? 'Fix post' : 'Retry post'}</button>`;
+}
+
+async function request(kind, postId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    await rpc('minuty_request', { p_kind: kind, p_post_id: postId || null });
+    STATE = await rpc('minuty_overview');
+    toast(kind === 'scrape' ? 'Scrape requested. It starts within ~10 min.' : 'Retry requested. It runs within ~10 min.');
+  } catch (e) { toast(e.message); }
+  const sb = $('#scrape'); sb.disabled = false; sb.textContent = 'Scrape now';
+  render();
+}
+
+async function reload() {
+  STATE = await rpc('minuty_overview');
+  for (const k of Object.keys(DAYS)) delete DAYS[k];
+  await render();
 }
 
 // ---------- views ----------
@@ -318,6 +355,10 @@ async function render() {
   $('#view-runs').classList.toggle('hidden', VIEW !== 'runs');
   const last = STATE.runs?.[0];
   $('#updated').textContent = `checked ${ago(STATE.updatedAt)}`;
+  const waitingReqs = (STATE.requests || []).filter((r) => !r.done_at);
+  $('#req').textContent = waitingReqs.length
+    ? `${waitingReqs.length} request${waitingReqs.length > 1 ? 's' : ''} waiting · starts within ~10 min`
+    : '';
 
   if (VIEW === 'runs') {
     $('#heading').textContent = 'Runs';
@@ -358,7 +399,7 @@ async function render() {
 
 async function open(pw, remember) {
   PW = pw;
-  STATE = await fetchBox('state.enc.json');
+  STATE = await rpc('minuty_overview');
   try { remember ? localStorage.setItem(KEY, pw) : localStorage.removeItem(KEY); } catch {}
   $('#gate').classList.add('hidden');
   $('#app').classList.remove('hidden');
@@ -369,7 +410,7 @@ $('#gate').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('#err').textContent = '';
   try { await open($('#pw').value, $('#remember').checked); }
-  catch (err) { $('#err').textContent = err.name === 'OperationError' ? 'Wrong password.' : err.message; }
+  catch (err) { $('#err').textContent = err.message; }
 });
 $('#q').addEventListener('input', () => render());
 document.addEventListener('click', async (e) => {
@@ -381,12 +422,18 @@ document.addEventListener('click', async (e) => {
   if (f) { FILTER = f.dataset.filter; return render(); }
   const c = e.target.closest('[data-copy]');
   if (c) { e.preventDefault(); return doCopy(c); }
+  const rt = e.target.closest('[data-retry]');
+  if (rt) {
+    return request('retry', rt.dataset.retry, rt);
+  }
+  if (e.target.closest('#scrape')) return request('scrape', null, e.target.closest('#scrape'));
+  if (e.target.closest('#refresh')) { toast('Reloading…'); return reload().catch((err) => toast(err.message)); }
 });
 
 (async () => {
   let saved = null;
   try { saved = localStorage.getItem(KEY); } catch {}
-  if (saved) open(saved, true).catch(() => { try { localStorage.removeItem(KEY); } catch {} });
+  if (saved) open(saved, true).catch((e) => { if (e.wrong) try { localStorage.removeItem(KEY); } catch {} $('#err').textContent = e.message; });
 })();
 </script>
 </body>

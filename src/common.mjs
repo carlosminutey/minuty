@@ -1,14 +1,7 @@
-// Shared bits for scrape.mjs and post.mjs: config, encrypted store, browser, AI step.
-import fs from 'node:fs';
-import crypto from 'node:crypto';
+// Shared bits for scrape.mjs and post.mjs: config, database, browser, AI step.
 import { chromium } from 'playwright';
-import { encryptJson, decryptJson } from './crypto.mjs';
 import { rewrite, loadRules } from './groq.mjs';
 
-// Encrypted data for the web page: docs/data/state.enc.json (records, run log, list of days)
-// plus one docs/data/YYYY-MM-DD.enc.json per IST day, so past days never change once done.
-const DATA_DIR = new URL('../docs/data/', import.meta.url);
-const LEGACY_STORE = new URL('../docs/data.enc.json', import.meta.url);
 
 export const env = (k, d) => (process.env[k] ?? '').trim() || d;
 export const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -17,6 +10,9 @@ export const CFG = {
   // Site addresses live in env / GitHub Secrets, not in the code.
   sourceUrl: env('SOURCE_URL', '').replace(/\/+$/, ''),
   targetUrl: env('TARGET_URL', '').replace(/\/+$/, ''),
+  // Database (Supabase). The publishable key is public by design; data access needs DATA_PASSWORD.
+  supabaseUrl: env('SUPABASE_URL', '').replace(/\/+$/, ''),
+  supabaseKey: env('SUPABASE_PUBLISHABLE_KEY', ''),
   email: env('SOURCE_EMAIL'),
   password: env('SOURCE_PASSWORD'),
   dataPassword: env('DATA_PASSWORD'),
@@ -40,7 +36,7 @@ export const CFG = {
 };
 
 export function requireEnv(keys) {
-  const names = { email: 'SOURCE_EMAIL', password: 'SOURCE_PASSWORD', dataPassword: 'DATA_PASSWORD', targetEmail: 'TARGET_EMAIL', targetPassword: 'TARGET_PASSWORD', sourceUrl: 'SOURCE_URL', targetUrl: 'TARGET_URL' };
+  const names = { supabaseUrl: 'SUPABASE_URL', supabaseKey: 'SUPABASE_PUBLISHABLE_KEY', email: 'SOURCE_EMAIL', password: 'SOURCE_PASSWORD', dataPassword: 'DATA_PASSWORD', targetEmail: 'TARGET_EMAIL', targetPassword: 'TARGET_PASSWORD', sourceUrl: 'SOURCE_URL', targetUrl: 'TARGET_URL' };
   for (const k of keys) if (!CFG[k]) throw new Error(`Missing env: ${names[k] ?? k}`);
 }
 
@@ -49,78 +45,39 @@ export function istDate(iso, offsetMin = CFG.tzOffsetMin) {
   return new Date(new Date(iso).getTime() + offsetMin * 60_000).toISOString().slice(0, 10);
 }
 
-// If DATA_PASSWORD was changed, set OLD_DATA_PASSWORD once: files are read with the old one
-// and saved again with the new one (npm run rekey).
-const readBox = async (url) => {
-  const box = JSON.parse(fs.readFileSync(url, 'utf8'));
-  try {
-    return await decryptJson(box, CFG.dataPassword);
-  } catch (e) {
-    const old = env('OLD_DATA_PASSWORD', '');
-    if (!old) throw new Error('Cannot decrypt the saved data with DATA_PASSWORD. If you changed it, add OLD_DATA_PASSWORD (the previous one) to .env and run: npm run rekey');
-    return decryptJson(box, old);
+// Calls a database function (Supabase). Every function checks DATA_PASSWORD itself.
+export async function rpc(name, args = {}) {
+  if (!CFG.supabaseUrl || !CFG.supabaseKey) throw new Error('Missing env: SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY');
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`${CFG.supabaseUrl}/rest/v1/rpc/${name}`, {
+      method: 'POST',
+      headers: { apikey: CFG.supabaseKey, 'content-type': 'application/json' },
+      body: JSON.stringify({ p_pass: CFG.dataPassword, ...args }),
+    });
+    const text = await res.text();
+    if (res.ok) return text ? JSON.parse(text) : null;
+    if (res.status >= 500 && attempt < 3) { await new Promise((r) => setTimeout(r, attempt * 3000)); continue; }
+    let msg = text.slice(0, 200);
+    try { msg = JSON.parse(text).message || msg; } catch {}
+    throw new Error(`Database ${name}: ${msg}`);
   }
-};
-const writeBox = async (url, obj) => fs.writeFileSync(url, JSON.stringify(await encryptJson(obj, CFG.dataPassword)));
-const dayFile = (date) => new URL(`${date}.enc.json`, DATA_DIR);
-const sha = (obj) => crypto.createHash('sha256').update(JSON.stringify(obj)).digest('hex').slice(0, 16);
-
-// Returns the state plus `items` from today's and yesterday's day files (all the 24-hour
-// window can touch). Older days stay on disk untouched. Returns null on the very first run.
-export async function loadStore() {
-  const stateUrl = new URL('state.enc.json', DATA_DIR);
-  if (!fs.existsSync(stateUrl)) {
-    if (!fs.existsSync(LEGACY_STORE)) return null;
-    return { dayHashes: {}, ...(await readBox(LEGACY_STORE)) }; // one-time move to the per-day layout
-  }
-  const store = await readBox(stateUrl);
-  store.items = {};
-  const today = istDate(new Date().toISOString());
-  const yesterday = istDate(new Date(Date.now() - 864e5).toISOString());
-  for (const date of [yesterday, today]) {
-    if (!fs.existsSync(dayFile(date))) continue;
-    Object.assign(store.items, (await readBox(dayFile(date))).items);
-  }
-  return store;
 }
 
-
-const KEEP_DAYS = 60;
+// State (records, run log, rotation) plus the posts of today and yesterday (IST), which is
+// all the 24-hour window can touch, plus any extra ids asked for. Null on the very first run.
+export async function loadStore({ ids = [] } = {}) {
+  const res = await rpc('minuty_load', { p_days: 2, p_ids: ids });
+  if (!res.state && !Object.keys(res.items ?? {}).length) return null;
+  return { ...(res.state ?? {}), items: res.items ?? {} };
+}
 
 export async function saveStore(store) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
   store.updatedAt = new Date().toISOString();
-  store.days ??= {};
-  store.dayHashes ??= {};
-
-  const byDay = {};
-  for (const it of Object.values(store.items)) (byDay[istDate(it.row.created_at)] ??= {})[it.id] = it;
-  for (const [date, items] of Object.entries(byDay)) {
-    const list = Object.values(items);
-    store.days[date] = {
-      count: list.length,
-      unlocked: list.filter((it) => it.detail?.unlocked).length,
-      rewritten: list.filter((it) => it.ai).length,
-      posted: list.filter((it) => it.post?.postedAt).length,
-    };
-    const h = sha(items);
-    if (store.dayHashes[date] === h && fs.existsSync(dayFile(date))) continue; // unchanged: don't rewrite the file
-    await writeBox(dayFile(date), { date, items });
-    store.dayHashes[date] = h;
-  }
-
-  // Drop days older than KEEP_DAYS.
-  const cutoff = istDate(new Date(Date.now() - KEEP_DAYS * 864e5).toISOString());
-  for (const date of Object.keys(store.days)) {
-    if (date >= cutoff) continue;
-    delete store.days[date];
-    delete store.dayHashes[date];
-    fs.rmSync(dayFile(date), { force: true });
-  }
-
-  const { items, ...state } = store;
-  await writeBox(new URL('state.enc.json', DATA_DIR), state);
-  if (fs.existsSync(LEGACY_STORE)) fs.rmSync(LEGACY_STORE);
+  const { items, days, dayHashes, ...state } = store;
+  const list = Object.values(items ?? {}).map((it) => ({
+    id: it.id, day: istDate(it.row.created_at), created_at: it.row.created_at, data: it,
+  }));
+  await rpc('minuty_save', { p_items: list, p_state: state });
 }
 
 // If Playwright's bundled browser is blocked (some Windows setups), fall back to installed Chrome.
@@ -149,7 +106,7 @@ export async function ensureAi(store, run) {
   const rules = loadRules();
   run.rewritten = 0;
   const todo = Object.values(store.items)
-    .filter((it) => !it.ai?.format && !it.post?.postedAt && it.row.status === 'open' && it.detail)
+    .filter((it) => !it.ai?.format && !it.post?.postedAt && (it.row.status === 'open' || it.retry) && it.detail)
     .sort((a, b) => String(a.row.created_at).localeCompare(String(b.row.created_at)));
   for (const it of todo) {
     const n = (store.formatCursor ?? 0) % rules.formats.length;

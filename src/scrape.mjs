@@ -1,13 +1,13 @@
 // minuty: watches the source site: log in, find new requirements, open each one,
 // expand the full text, (optionally) unlock the client chat, and save everything
-// into encrypted files in docs/data/ (one per IST day + a state file) that the web page reads.
-import { CFG, log, requireEnv, loadStore, saveStore, launchBrowser, newPage, ensureAi, signIn } from './common.mjs';
+// into the Supabase database that the web page reads.
+import { CFG, log, requireEnv, loadStore, saveStore, launchBrowser, newPage, ensureAi, signIn, rpc } from './common.mjs';
 import { lastHoursWindow, inWindow } from './window.mjs';
 import { postJobs } from './poster.mjs';
 
 const BASE = CFG.sourceUrl;
 
-requireEnv(['sourceUrl', 'email', 'password', 'dataPassword']);
+requireEnv(['sourceUrl', 'email', 'password', 'dataPassword', 'supabaseUrl', 'supabaseKey']);
 
 const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const fingerprint = (row) => `${norm(row.title)}|${norm(row.description).slice(0, 400)}`;
@@ -122,9 +122,22 @@ async function scrapeDetail(page, id, { unlock }) {
 }
 
 async function main() {
-  const prev = await loadStore();
+  // Requests from the web page buttons: "Scrape now" (a normal run covers it) and "Retry post".
+  const pending = await rpc('minuty_pending').catch((e) => { log(`Requests: ${e.message}`); return []; });
+  const retryIds = pending.filter((r) => r.kind === 'retry' && r.post_id).map((r) => r.post_id);
+
+  const prev = await loadStore({ ids: retryIds });
   const firstRun = !prev;
   const store = prev ?? { createdAt: new Date().toISOString(), items: {}, runs: [] };
+  for (const id of retryIds) {
+    const it = store.items[id];
+    if (!it) continue;
+    // Forget the earlier attempt; the title check on the job board still prevents a duplicate.
+    delete it.post;
+    if (store.postLedger) delete store.postLedger[id];
+    it.retry = true;
+  }
+  if (pending.length) log(`Requests: ${pending.length} (${retryIds.length} retry)`);
 
   const browser = await launchBrowser();
   const page = await newPage(browser);
@@ -141,7 +154,7 @@ async function main() {
     const win = lastHoursWindow(Date.now(), CFG);
     store.date = win.date;
     store.window = `last ${CFG.windowHours} h`;
-    store.sourceUrl = CFG.sourceUrl; // the page builds "open" links from this (kept encrypted)
+    store.sourceUrl = CFG.sourceUrl; // the page builds "open" links from this (behind the password)
     // Content fingerprints of everything captured in the last 7 days, so a post that is
     // reposted under a new ID (same title + description) is never captured twice.
     store.fingerprints = Object.fromEntries(
@@ -220,8 +233,17 @@ async function main() {
   } finally {
     await browser.close();
     if (feedOk || !firstRun) {
+      for (const id of retryIds) {
+        const it = store.items[id];
+        if (!it) continue;
+        run.notes.push(`Retry ${id.slice(0, 8)}: ${it.post?.postedAt ? (it.post.note || 'posted') : 'not posted'}`);
+        delete it.retry;
+      }
       store.runs = [run, ...(store.runs ?? [])].slice(0, 200);
       await saveStore(store);
+      if (pending.length) {
+        await rpc('minuty_done', { p_ids: pending.map((r) => r.id), p_result: feedOk ? 'done' : 'run failed' }).catch(() => {});
+      }
       log('Saved.', JSON.stringify({ ...run, notes: run.notes.length }), run.notes.length ? '(details on the web page, Runs tab)' : '');
     }
   }

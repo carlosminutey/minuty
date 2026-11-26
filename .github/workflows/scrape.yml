@@ -2,8 +2,11 @@ name: minuty
 
 on:
   schedule:
-    # Every 3 hours, all day: 02:30, 05:30, 08:30 … 23:30 IST (cron is UTC = IST − 5:30)
+    # Main run every 3 hours, all day: 05:30, 08:30 … 02:30 IST (cron is UTC = IST − 5:30).
     - cron: '0 */3 * * *'
+    # Quick check every 10 minutes: runs a scrape only if the web page asked for one
+    # ("Scrape now" or "Retry post"). Takes a few seconds when there is nothing to do.
+    - cron: '*/10 * * * *'
   workflow_dispatch: # "Run workflow" button for a manual run
 
 permissions:
@@ -12,6 +15,13 @@ permissions:
 concurrency:
   group: scrape
   cancel-in-progress: false
+
+env:
+  MAIN_CRON: '0 */3 * * *'
+  # Public by design (like a website's address); every data call also needs DATA_PASSWORD.
+  SUPABASE_URL: https://fcaeqtmyysbvbaanvzxr.supabase.co
+  SUPABASE_PUBLISHABLE_KEY: sb_publishable_lKQBOh5O9H-rLXR1DEk4vA_nT7CTVqk
+  DATA_PASSWORD: ${{ secrets.DATA_PASSWORD }}
 
 jobs:
   scrape:
@@ -27,22 +37,30 @@ jobs:
 
       - run: npm ci
 
+      - name: Anything to do?
+        id: check
+        run: node src/check.mjs
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+
       - name: Cache Playwright browser
+        if: steps.check.outputs.go == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: pw-${{ hashFiles('package-lock.json') }}
 
-      - run: npx playwright install --with-deps chromium
+      - if: steps.check.outputs.go == 'true'
+        run: npx playwright install --with-deps chromium
 
-      - name: Scrape
+      - name: Scrape, rewrite, post
+        if: steps.check.outputs.go == 'true'
         run: node src/scrape.mjs
         env:
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
           TARGET_URL: ${{ secrets.TARGET_URL }}
           SOURCE_EMAIL: ${{ secrets.SOURCE_EMAIL }}
           SOURCE_PASSWORD: ${{ secrets.SOURCE_PASSWORD }}
-          DATA_PASSWORD: ${{ secrets.DATA_PASSWORD }}
           AUTO_UNLOCK: ${{ vars.AUTO_UNLOCK || 'true' }}
           MAX_UNLOCKS_PER_RUN: ${{ vars.MAX_UNLOCKS_PER_RUN || '0' }}
           WINDOW_HOURS: ${{ vars.WINDOW_HOURS || '24' }}
@@ -53,10 +71,17 @@ jobs:
           AUTO_POST: ${{ vars.AUTO_POST || 'true' }}
           MAX_POSTS_PER_RUN: ${{ vars.MAX_POSTS_PER_RUN || '0' }}
 
-      - name: Commit data
-        if: always()
+      # GitHub pauses scheduled workflows after 60 days without commits, so a main run
+      # touches a heartbeat file once a week.
+      - name: Weekly heartbeat
+        if: steps.check.outputs.go == 'true' && github.event.schedule == env.MAIN_CRON
         run: |
-          git config user.name "scraper-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add -A docs/data docs/data.enc.json 2>/dev/null || git add -A docs/data
-          git diff --cached --quiet || (git commit -m "data: $(date -u +%Y-%m-%dT%H:%MZ)" && git push)
+          f=.github/heartbeat
+          last=$(cat $f 2>/dev/null || echo 0)
+          now=$(date -u +%s)
+          if [ $((now - last)) -gt 604800 ]; then
+            echo $now > $f
+            git config user.name "scraper-bot"
+            git config user.email "actions@users.noreply.github.com"
+            git add $f && git commit -m "heartbeat" && git push
+          fi

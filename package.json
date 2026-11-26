@@ -2,7 +2,7 @@
   "name": "minuty",
   "version": "1.0.0",
   "private": true,
-  "description": "minuty: watches a source site for new requirements, rewrites them with AI, posts them to a job board, and publishes an encrypted web page.",
+  "description": "minuty: watches a source site for new requirements, rewrites them with AI, posts them to a job board, and keeps everything in a Supabase database with a phone-friendly page.",
   "type": "module",
   "scripts": {
     "scrape": "node --env-file-if-exists=.env src/scrape.mjs",
@@ -11,9 +11,11 @@
     "view": "node src/serve.mjs",
     "export": "node --env-file-if-exists=.env src/decrypt.mjs > today.decrypted.json",
     "post": "node --env-file-if-exists=.env src/post.mjs",
-    "rekey": "node --env-file-if-exists=.env src/rekey.mjs"
+    "db:setup": "node --env-file-if-exists=.env src/setup-db.mjs",
+    "check": "node --env-file-if-exists=.env src/check.mjs"
   },
   "dependencies": {
+    "pg": "^8.23.1",
     "playwright": "^1.65.1"
   }
 }

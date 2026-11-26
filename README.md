@@ -6,9 +6,9 @@ A small personal automation. Every 3 hours it:
 2. Opens each new post, expands the full text, unlocks the client contact, and saves it all.
 3. Sends each post once to **Groq AI** for a rewrite, in one of 10 rotating layouts.
 4. Posts the rewritten job to a **job board** through its admin form, then sets its publish time and bid cost.
-5. Saves everything encrypted in `docs/data/` and shows it on a phone-friendly web page.
+5. Saves everything in a **Supabase** database and shows it on a phone-friendly web page.
 
-It all runs free on GitHub: Actions does the runs and Pages hosts the page.
+It all runs free: GitHub Actions does the runs, GitHub Pages hosts the page, and Supabase (free plan) holds the data.
 The site addresses and logins are never in the code. They live in GitHub Secrets (and in `.env` locally).
 
 ## Schedule and window
@@ -38,17 +38,23 @@ In the same run, as soon as a post is rewritten, it's posted and published immed
 - **On the job's card:** the publish date and time (IST) is set to the source's posting time, and the **bid cost** is a random 2–5. Both are saved, then read back after a reload.
 - `npm run post -- --dry` shows what would be filled in. `npm run post -- --limit=1` posts just the newest job. `--no-ai` posts with the saved AI text and makes no Groq calls.
 
+## Database (Supabase)
+- Tables: `minuty_posts` (one row per post, by IST day), `minuty_state` (records, run log, layout rotation) and `minuty_requests` (button requests).
+- The tables are locked: the public key can't read or write them. Everything goes through database functions that check `DATA_PASSWORD` (stored only as a bcrypt hash). So GitHub needs no database secret.
+- `npm run db:setup` creates the tables and functions from `sql/schema.sql` and stores the password hash. It needs `SUPABASE_DB_PASSWORD` and `SUPABASE_DB_HOST` in `.env`, and is only run from your PC.
+
 ## The web page
 - **Today:** today's posts (IST), with counts for captured, unlocked, rewritten and posted. Filters: All, Not posted, Posted, Locked.
 - **Each post** shows a 4-step strip (Scraped → Unlocked → Rewritten → Posted, each with its time), the contacts with copy buttons, the AI version (with its layout name), the posting details (posted time, publish time, bid cost) and the original. There are buttons to copy everything, the email, the title or the description.
-- **Past days:** every earlier day, kept 60 days. **Runs:** a log of every check (new, unlocked, rewritten, posted, plus any problems).
+- **Scrape now** (top right) asks for an extra run, and **Retry post** (on a post that failed to post, or whose publish time or bid wasn't confirmed) asks to try that one again. A check every 10 minutes picks these up, so they start within about 10 minutes.
+- **Past days:** every earlier day. **Runs:** a log of every check (new, unlocked, rewritten, posted, plus any problems).
 
 ## One-time setup on GitHub
 1. Push this folder to a GitHub repo.
 2. In the repo, go to **Settings → Secrets and variables → Actions → Secrets** and add:
    - `SOURCE_URL`, `SOURCE_EMAIL`, `SOURCE_PASSWORD`: the source site's address and login
    - `TARGET_URL`, `TARGET_EMAIL`, `TARGET_PASSWORD`: the job board's address and admin login
-   - `DATA_PASSWORD`: the passphrase that encrypts the data (the same one as in your `.env`; you type it on the web page)
+   - `DATA_PASSWORD`: your data password (the same one as in `.env`; you type it on the web page)
    - `GROQ_API_KEY`: your Groq key
 3. Optional: on the **Variables** tab, set `AUTO_UNLOCK`, `MAX_UNLOCKS_PER_RUN`, `WINDOW_HOURS`, `GROQ_MODEL`, `AUTO_POST` and `MAX_POSTS_PER_RUN`.
 4. Go to **Settings → Pages**, set Source to *Deploy from a branch*, choose branch `main` and folder `/docs`, then save.
@@ -66,7 +72,7 @@ npm install; npx playwright install chromium; npm run scrape
 - Set `HEADLESS=false` in `.env` to watch the browser.
 - `npm run view` opens the page at http://localhost:5174.
 - `npm run export` writes the data to `today.decrypted.json`, which git ignores.
-- Changed `DATA_PASSWORD`? Add the old one as `OLD_DATA_PASSWORD` in `.env`, run `npm run rekey`, then remove that line.
+- Changed `DATA_PASSWORD`? Update it in `.env` and in the GitHub secret, then run `npm run db:setup` once.
 
 ## Notes
 - If a run fails, the Actions log says why. Logs never show site addresses or page text, because the repo is public.
@@ -75,4 +81,4 @@ npm install; npx playwright install chromium; npm run scrape
 ## Code map
 - `src/scrape.mjs`: the main run (scrape, then AI, then posting).
 - `src/poster.mjs`: the posting browser steps. `src/job-map.mjs`: the field mapping.
-- `src/groq.mjs`: the AI rewrite. `src/common.mjs`: config, encrypted storage, browser.
+- `src/groq.mjs`: the AI rewrite. `src/common.mjs`: config, database calls, browser. `sql/schema.sql`: the database.
