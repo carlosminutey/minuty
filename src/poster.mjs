@@ -48,7 +48,8 @@ async function login(page) {
     emailBox: () => page.locator('input[type=email]').first(),
     passwordBox: () => page.locator('input[type=password]').first(),
     // The real submit button: the page also has a "Log in" tab button that only switches tabs.
-    submit: () => page.locator('button[type=submit]', { hasText: /^\s*(log in|sign in|login)\s*$/i }).first(),
+    // (It has no type attribute, so match by text and take the last one, after the tab button.)
+    submit: () => page.locator('button', { hasText: /^\s*(log in|sign in|login)\s*$/i }).last(),
   });
 }
 
