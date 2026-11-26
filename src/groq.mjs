@@ -105,8 +105,13 @@ export async function rewrite({ title, description }, { apiKey, model, rules, fo
     }
     if (!res.ok) throw new Error(`Groq ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data = await res.json();
-    const out = parseJson(data.choices?.[0]?.message?.content ?? '');
-    if (!out.title || !out.description) throw new Error('Groq reply missing title/description');
+    let out = {};
+    try { out = parseJson(data.choices?.[0]?.message?.content ?? ''); } catch {}
+    if (!out.title || !out.description) {
+      // Incomplete or unreadable reply (it happens now and then): ask again.
+      if (attempt < 4) { await new Promise((r) => setTimeout(r, 3000)); continue; }
+      throw new Error('Groq reply missing title/description');
+    }
     return {
       title: String(out.title).trim(),
       description: cleanText(out.description),

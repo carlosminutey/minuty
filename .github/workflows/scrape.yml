@@ -2,10 +2,9 @@ name: minuty
 
 on:
   schedule:
-    # Main run every 3 hours, all day: 05:30, 08:30 … 02:30 IST (cron is UTC = IST − 5:30).
-    - cron: '0 */3 * * *'
-    # Quick check every 10 minutes: runs a scrape only if the web page asked for one
-    # ("Scrape now" or "Retry post"). Takes a few seconds when there is nothing to do.
+    # A quick check every 10 minutes (a few seconds when there is nothing to do). It does a full
+    # run when the last one is 3 hours old, or when the web page asked (Scrape now / Retry post).
+    # GitHub sometimes starts these late or skips some; the check makes up for that.
     - cron: '*/10 * * * *'
   workflow_dispatch: # "Run workflow" button for a manual run
 
@@ -17,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  MAIN_CRON: '0 */3 * * *'
+  RUN_EVERY_MINUTES: '180'
   # Public by design (like a website's address); every data call also needs DATA_PASSWORD.
   SUPABASE_URL: https://fcaeqtmyysbvbaanvzxr.supabase.co
   SUPABASE_PUBLISHABLE_KEY: sb_publishable_lKQBOh5O9H-rLXR1DEk4vA_nT7CTVqk
@@ -40,8 +39,6 @@ jobs:
       - name: Anything to do?
         id: check
         run: node src/check.mjs
-        env:
-          SCHEDULE: ${{ github.event.schedule }}
 
       - name: Cache Playwright browser
         if: steps.check.outputs.go == 'true'
@@ -74,7 +71,7 @@ jobs:
       # GitHub pauses scheduled workflows after 60 days without commits, so a main run
       # touches a heartbeat file once a week.
       - name: Weekly heartbeat
-        if: steps.check.outputs.go == 'true' && github.event.schedule == env.MAIN_CRON
+        if: steps.check.outputs.due == 'true'
         run: |
           f=.github/heartbeat
           last=$(cat $f 2>/dev/null || echo 0)

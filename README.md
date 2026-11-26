@@ -12,7 +12,7 @@ It all runs free: GitHub Actions does the runs, GitHub Pages hosts the page, and
 The site addresses and logins are never in the code. They live in GitHub Secrets (and in `.env` locally).
 
 ## Schedule and window
-- Runs **every 3 hours, all day**: 02:30, 05:30, 08:30, 11:30, 14:30, 17:30, 20:30 and 23:30 IST.
+- Runs **every 3 hours, all day**. A quick check runs every 10 minutes and starts a full run once the last one is 3 hours old, so late or skipped GitHub schedules are made up for.
 - Captures posts **created in the last 24 hours** (`WINDOW_HOURS`). Older posts are never opened.
 - To change how often it runs, edit the cron line in `.github/workflows/scrape.yml` (cron is in UTC, which is IST minus 5:30).
 
