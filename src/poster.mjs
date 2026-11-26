@@ -43,12 +43,12 @@ export function postable(store, { needAi = true } = {}) {
 
 async function login(page) {
   log('Job board: signing in…');
-  const submit = page.locator('form:has(input[type=password]) button[type=submit]');
   await signIn(page, {
     url: `${boardUrl()}/auth`, email: CFG.targetEmail, password: CFG.targetPassword, label: 'Job board',
     emailBox: () => page.locator('input[type=email]').first(),
     passwordBox: () => page.locator('input[type=password]').first(),
-    submit: () => submit.first(),
+    // The real submit button: the page also has a "Log in" tab button that only switches tabs.
+    submit: () => page.locator('button[type=submit]', { hasText: /^\s*(log in|sign in|login)\s*$/i }).first(),
   });
 }
 
@@ -178,7 +178,7 @@ export async function postJobs(page, store, { limit = Infinity, run, needAi = tr
 
   for (const it of queue) {
     const job = buildJob(it, CFG);
-    log(`Job board → ${job.title.slice(0, 70)}`);
+    log(`Job board → post ${it.id.slice(0, 8)}`);
     try {
       await openJobsPage(page);
       // Safety net against double posting if a previous run crashed before saving its ledger.

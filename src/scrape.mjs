@@ -182,7 +182,7 @@ async function main() {
     for (const it of queue) {
       const wantUnlock = unlocksLeft > 0 && !outOfStars;
       if (it.detail && !wantUnlock) continue; // already scraped, nothing more to do now
-      log(`→ ${it.row.title?.slice(0, 70)} (${it.id}) unlock=${wantUnlock}`);
+      log(`→ post ${it.id.slice(0, 8)} unlock=${wantUnlock}`);
       try {
         const detail = await scrapeDetail(page, it.id, { unlock: wantUnlock });
         it.detail = detail;
@@ -204,7 +204,14 @@ async function main() {
     // Post new jobs to the job board (skipped when TARGET_EMAIL / TARGET_PASSWORD are not set).
     if (CFG.targetEmail && CFG.targetPassword && CFG.autoPost) {
       await saveStore(store); // keep the scrape safe even if posting crashes
-      await postJobs(page, store, { limit: CFG.maxPostsPerRun, run });
+      try {
+        await postJobs(page, store, { limit: CFG.maxPostsPerRun, run });
+      } catch (e) {
+        // A posting problem must not lose the scrape; posts left over are retried next run.
+        const msg = e.message.split('\n')[0];
+        log('Job board step failed.');
+        run.notes.push(`Posting failed: ${msg}`);
+      }
     }
   } catch (e) {
     run.notes.push(`FATAL: ${e.message}`);
